@@ -1,18 +1,24 @@
--- Extensions
+-- SPOT FITNESS / Supabase schema
+-- Generated to match business entities and RLS constraints.
+
 create extension if not exists "pgcrypto";
 
--- Enums
-create type user_role as enum ('superadmin', 'abonne');
-create type subscription_status as enum ('actif', 'expire', 'bloque', 'en_attente');
-create type plan_type as enum ('mensuel', 'semestriel', 'annuel');
+-- =========================
+-- ENUMS
+-- =========================
+create type public.user_role as enum ('superadmin', 'member');
+create type public.subscription_status as enum ('active', 'expired', 'blocked', 'pending_payment');
+create type public.subscription_plan_type as enum ('monthly', 'semester', 'yearly');
 
--- Tables
+-- =========================
+-- TABLES
+-- =========================
 create table if not exists public.users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
   name text not null,
   phone text,
-  role user_role not null default 'abonne',
+  role public.user_role not null default 'member',
   qr_code text not null unique,
   created_at timestamptz not null default timezone('utc', now())
 );
@@ -20,10 +26,9 @@ create table if not exists public.users (
 create table if not exists public.promotions (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
-  discount_percent integer not null check (discount_percent between 1 and 100),
+  discount_percent integer not null check (discount_percent between 0 and 100),
   valid_until date not null,
-  is_active boolean not null default true,
-  created_at timestamptz not null default timezone('utc', now())
+  is_active boolean not null default true
 );
 
 create table if not exists public.subscriptions (
@@ -31,14 +36,12 @@ create table if not exists public.subscriptions (
   user_id uuid not null references public.users(id) on delete cascade,
   start_date date not null,
   end_date date not null,
-  status subscription_status not null default 'en_attente',
-  plan_type plan_type not null,
-  amount_paid numeric(10, 2) not null check (amount_paid >= 0),
-  promo_code_id uuid references public.promotions(id),
+  status public.subscription_status not null default 'pending_payment',
+  plan_type public.subscription_plan_type not null,
+  amount_paid numeric(10, 2) not null default 0 check (amount_paid >= 0),
+  promo_code_id uuid references public.promotions(id) on delete set null,
   payment_date timestamptz,
   receipt_number text unique,
-  created_at timestamptz not null default timezone('utc', now()),
-  updated_at timestamptz not null default timezone('utc', now()),
   constraint subscription_dates_valid check (end_date >= start_date)
 );
 
@@ -46,8 +49,7 @@ create table if not exists public.attendances (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
   check_in_date date not null default current_date,
-  validated_by uuid not null references public.users(id),
-  created_at timestamptz not null default timezone('utc', now()),
+  validated_by uuid references public.users(id) on delete set null,
   unique (user_id, check_in_date)
 );
 
@@ -58,16 +60,20 @@ create table if not exists public.payment_transactions (
   amount numeric(10, 2) not null check (amount > 0),
   payment_date timestamptz not null default timezone('utc', now()),
   receipt_number text not null unique,
-  validated_by uuid not null references public.users(id),
-  created_at timestamptz not null default timezone('utc', now())
+  validated_by uuid references public.users(id) on delete set null
 );
 
--- Indexes
-create index if not exists idx_subscriptions_user_status on public.subscriptions(user_id, status);
-create index if not exists idx_subscriptions_end_date on public.subscriptions(end_date);
+-- =========================
+-- INDEXES
+-- =========================
+create index if not exists idx_users_email on public.users(email);
+create index if not exists idx_users_qr_code on public.users(qr_code);
+create index if not exists idx_subscriptions_status on public.subscriptions(status);
 create index if not exists idx_attendances_check_in_date on public.attendances(check_in_date);
 
--- Helpers
+-- =========================
+-- HELPERS / BUSINESS FUNCTIONS
+-- =========================
 create or replace function public.is_superadmin()
 returns boolean
 language sql
@@ -81,9 +87,10 @@ as $$
   );
 $$;
 
-create sequence if not exists public.receipt_seq start 1000;
+create sequence if not exists public.receipt_seq start 1;
 
-create or replace function public.generate_receipt_number(prefix text default 'REC')
+-- Receipt format: REC-YYYY-XXXXX
+create or replace function public.generate_receipt_number()
 returns text
 language plpgsql
 as $$
@@ -91,126 +98,154 @@ declare
   seq_num bigint;
 begin
   seq_num := nextval('public.receipt_seq');
-  return format('%s-%s-%s', prefix, to_char(current_date, 'YYYYMMDD'), lpad(seq_num::text, 6, '0'));
+  return format('REC-%s-%s', to_char(current_date, 'YYYY'), lpad(seq_num::text, 5, '0'));
 end;
 $$;
 
-create or replace function public.calculate_subscription_amount(p_plan plan_type, p_promo uuid default null)
-returns numeric
-language plpgsql
-stable
-as $$
-declare
-  base_amount numeric;
-  discount integer;
-begin
-  base_amount := case p_plan
-    when 'mensuel' then 50
-    when 'semestriel' then 250
-    when 'annuel' then 450
-  end;
-
-  if p_promo is null then
-    return base_amount;
-  end if;
-
-  select discount_percent
-  into discount
-  from public.promotions
-  where id = p_promo
-    and is_active = true
-    and valid_until >= current_date;
-
-  if discount is null then
-    return base_amount;
-  end if;
-
-  return round(base_amount * (1 - (discount::numeric / 100)), 2);
-end;
-$$;
-
-create or replace function public.set_updated_at()
+create or replace function public.set_receipt_number_if_missing()
 returns trigger
 language plpgsql
 as $$
 begin
-  new.updated_at = timezone('utc', now());
+  if new.receipt_number is null or btrim(new.receipt_number) = '' then
+    new.receipt_number := public.generate_receipt_number();
+  end if;
+
   return new;
 end;
 $$;
 
-create trigger trg_subscriptions_set_updated_at
-before update on public.subscriptions
-for each row execute function public.set_updated_at();
+create trigger trg_subscriptions_set_receipt
+before insert on public.subscriptions
+for each row
+execute function public.set_receipt_number_if_missing();
 
+create trigger trg_transactions_set_receipt
+before insert on public.payment_transactions
+for each row
+execute function public.set_receipt_number_if_missing();
+
+-- Remaining subscription duration in days (0 if already expired)
+create or replace function public.subscription_remaining_days(p_subscription_id uuid)
+returns integer
+language sql
+stable
+as $$
+  select greatest((s.end_date - current_date), 0)::int
+  from public.subscriptions s
+  where s.id = p_subscription_id;
+$$;
+
+-- Keep subscription status synchronized with dates
+create or replace function public.sync_subscription_status()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'blocked' then
+    return new;
+  end if;
+
+  if new.end_date < current_date then
+    new.status := 'expired';
+  elsif new.payment_date is null then
+    new.status := 'pending_payment';
+  elsif new.start_date <= current_date and new.end_date >= current_date then
+    new.status := 'active';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_subscriptions_sync_status
+before insert or update on public.subscriptions
+for each row
+execute function public.sync_subscription_status();
+
+-- Optional helper to update existing rows in bulk (can be used by cron)
+create or replace function public.refresh_expired_subscriptions()
+returns integer
+language plpgsql
+as $$
+declare
+  updated_count integer;
+begin
+  update public.subscriptions
+  set status = 'expired'
+  where status <> 'blocked'
+    and end_date < current_date;
+
+  get diagnostics updated_count = row_count;
+  return updated_count;
+end;
+$$;
+
+-- =========================
 -- RLS
+-- =========================
 alter table public.users enable row level security;
 alter table public.subscriptions enable row level security;
 alter table public.attendances enable row level security;
 alter table public.promotions enable row level security;
 alter table public.payment_transactions enable row level security;
 
-create policy "users self read"
-  on public.users
-  for select
-  using (id = auth.uid() or public.is_superadmin());
-
-create policy "users superadmin manage"
+-- users
+create policy "users superadmin all"
   on public.users
   for all
   using (public.is_superadmin())
   with check (public.is_superadmin());
 
-create policy "subscriptions self read"
-  on public.subscriptions
+create policy "users member select self"
+  on public.users
   for select
-  using (user_id = auth.uid() or public.is_superadmin());
+  using (id = auth.uid());
 
-create policy "subscriptions superadmin manage"
+-- subscriptions
+create policy "subscriptions superadmin all"
   on public.subscriptions
   for all
   using (public.is_superadmin())
   with check (public.is_superadmin());
 
-create policy "attendances self read"
-  on public.attendances
+create policy "subscriptions member select own"
+  on public.subscriptions
   for select
-  using (user_id = auth.uid() or public.is_superadmin());
+  using (user_id = auth.uid());
 
-create policy "attendances superadmin insert"
+-- attendances
+create policy "attendances superadmin all"
   on public.attendances
-  for insert
-  with check (public.is_superadmin());
-
-create policy "attendances superadmin update_delete"
-  on public.attendances
-  for update
+  for all
   using (public.is_superadmin())
   with check (public.is_superadmin());
 
-create policy "promotions authenticated read"
+create policy "attendances member select own"
+  on public.attendances
+  for select
+  using (user_id = auth.uid());
+
+-- promotions (shared catalogue; members can only read)
+create policy "promotions superadmin all"
+  on public.promotions
+  for all
+  using (public.is_superadmin())
+  with check (public.is_superadmin());
+
+create policy "promotions member select"
   on public.promotions
   for select
   using (auth.uid() is not null);
 
-create policy "promotions superadmin manage"
-  on public.promotions
+-- payment transactions
+create policy "transactions superadmin all"
+  on public.payment_transactions
   for all
   using (public.is_superadmin())
   with check (public.is_superadmin());
 
-create policy "transactions self read"
+create policy "transactions member select own"
   on public.payment_transactions
   for select
-  using (user_id = auth.uid() or public.is_superadmin());
-
-create policy "transactions superadmin manage"
-  on public.payment_transactions
-  for all
-  using (public.is_superadmin())
-  with check (public.is_superadmin());
-
--- Seed promotion example
-insert into public.promotions (code, discount_percent, valid_until, is_active)
-values ('WELCOME20', 20, current_date + interval '60 day', true)
-on conflict (code) do nothing;
+  using (user_id = auth.uid());
