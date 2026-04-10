@@ -13,6 +13,7 @@ type PendingPaymentRow = {
   end_date: string;
   plan_type: string;
   amount_paid: number;
+  remaining_balance: number;
   payment_request_date: string | null;
   user_name: string;
 };
@@ -23,7 +24,7 @@ function formatDate(value: string) {
 
 export function PaymentValidationModal({ subscription }: { subscription: PendingPaymentRow }) {
   const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState(String(subscription.amount_paid));
+  const [amount, setAmount] = useState(String(subscription.remaining_balance));
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
   const [receiptNumber, setReceiptNumber] = useState<string>("");
@@ -64,17 +65,21 @@ export function PaymentValidationModal({ subscription }: { subscription: Pending
     setError(null);
 
     try {
-      const supabase = createClient();
+      const supabase = createClient() as any;
       const generatedReceiptNumber = await ensureReceiptNumber();
       const amountValue = Number(amount);
+      const nextRemainingBalance = Number(Math.max(0, subscription.remaining_balance - amountValue).toFixed(2));
+      const nextPaidAmount = Number((subscription.amount_paid + amountValue).toFixed(2));
+      const nextStatus = nextRemainingBalance <= 0 ? "active" : "pending_payment";
 
       const { error: updateError } = await supabase
         .from("subscriptions")
         .update({
-          status: "active",
-          payment_date: new Date(paymentDate).toISOString(),
-          amount_paid: amountValue,
-          receipt_number: generatedReceiptNumber
+          status: nextStatus,
+          payment_date: nextStatus === "active" ? new Date(paymentDate).toISOString() : null,
+          amount_paid: nextPaidAmount,
+          remaining_balance: nextRemainingBalance,
+          receipt_number: nextStatus === "active" ? generatedReceiptNumber : null
         })
         .eq("id", subscription.id);
 
@@ -100,23 +105,25 @@ export function PaymentValidationModal({ subscription }: { subscription: Pending
         receiptNumber: generatedReceiptNumber
       };
 
-      const response = await fetch("/api/generate-receipt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(receiptPayload)
-      });
+      if (nextStatus === "active") {
+        const response = await fetch("/api/generate-receipt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(receiptPayload)
+        });
 
-      if (!response.ok) {
-        throw new Error("Impossible de générer le PDF du reçu.");
+        if (!response.ok) {
+          throw new Error("Impossible de générer le PDF du reçu.");
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${generatedReceiptNumber}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
       }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${generatedReceiptNumber}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
 
       setOpen(false);
       router.refresh();
@@ -152,6 +159,7 @@ export function PaymentValidationModal({ subscription }: { subscription: Pending
                 Montant reçu
                 <input
                   className="mt-1 w-full rounded-lg border px-3 py-2"
+                  max={subscription.remaining_balance}
                   min="0"
                   onChange={(event: ChangeEvent<HTMLInputElement>) => setAmount(event.target.value)}
                   step="0.01"
@@ -183,6 +191,7 @@ export function PaymentValidationModal({ subscription }: { subscription: Pending
             </label>
 
             <p className="mt-2 text-xs text-slate-500">Numéro de reçu généré automatiquement à la confirmation.</p>
+            <p className="mt-1 text-xs text-slate-500">Reste à encaisser: {subscription.remaining_balance.toFixed(2)} MAD.</p>
 
             <div className="mt-4">
               <PaymentReceipt payload={payloadPreview} />
