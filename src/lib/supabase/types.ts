@@ -37,6 +37,7 @@ export interface Database {
           status: SubscriptionStatus;
           plan_type: PlanType;
           amount_paid: number;
+          remaining_balance: number;
           promo_code_id: string | null;
           payment_date: string | null;
           payment_request_date: string | null;
@@ -52,6 +53,7 @@ export interface Database {
           status?: SubscriptionStatus;
           plan_type: PlanType;
           amount_paid: number;
+          remaining_balance?: number;
           promo_code_id?: string | null;
           payment_date?: string | null;
           payment_request_date?: string | null;
@@ -121,6 +123,25 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payment_transactions"]["Insert"]>;
+      };
+      audit_log: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string;
+          action: string;
+          details: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          entity_type: string;
+          entity_id: string;
+          action: string;
+          details?: Json | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["audit_log"]["Insert"]>;
       };
     };
     Views: Record<string, never>;

@@ -11,7 +11,7 @@ export default async function AdminPaymentsPage() {
 
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, user_id, plan_type, amount_paid, payment_request_date, created_at, start_date, end_date, users!inner(name)")
+    .select("id, user_id, plan_type, amount_paid, remaining_balance, payment_request_date, created_at, start_date, end_date, users!inner(name)")
     .eq("status", "pending_payment")
     .order("payment_request_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: true });
@@ -28,6 +28,7 @@ export default async function AdminPaymentsPage() {
       user_id: row.user_id,
       plan_type: row.plan_type,
       amount_paid: Number(row.amount_paid),
+      remaining_balance: Number(row.remaining_balance ?? 0),
       payment_request_date: row.payment_request_date,
       created_at: row.created_at,
       start_date: row.start_date,
@@ -63,7 +64,7 @@ export default async function AdminPaymentsPage() {
               rows.map((row) => (
                 <tr className="border-t" key={row.id}>
                   <td className="px-4 py-3 font-medium">{row.user_name}</td>
-                  <td className="px-4 py-3">{row.amount_paid.toFixed(2)} MAD</td>
+                  <td className="px-4 py-3">{row.remaining_balance.toFixed(2)} MAD</td>
                   <td className="px-4 py-3">{row.plan_type}</td>
                   <td className="px-4 py-3">{formatDate(row.payment_request_date ?? row.created_at)}</td>
                   <td className="px-4 py-3">
