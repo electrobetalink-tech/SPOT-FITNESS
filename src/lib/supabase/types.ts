@@ -1,6 +1,6 @@
-export type UserRole = "superadmin" | "abonne";
-export type SubscriptionStatus = "actif" | "expire" | "bloque" | "en_attente";
-export type PlanType = "mensuel" | "semestriel" | "annuel";
+export type UserRole = "superadmin" | "member";
+export type SubscriptionStatus = "active" | "expired" | "blocked" | "pending_payment";
+export type PlanType = "monthly" | "semester" | "yearly";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -39,6 +39,7 @@ export interface Database {
           amount_paid: number;
           promo_code_id: string | null;
           payment_date: string | null;
+          payment_request_date: string | null;
           receipt_number: string | null;
           created_at: string;
           updated_at: string;
@@ -53,6 +54,7 @@ export interface Database {
           amount_paid: number;
           promo_code_id?: string | null;
           payment_date?: string | null;
+          payment_request_date?: string | null;
           receipt_number?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -64,14 +66,14 @@ export interface Database {
           id: string;
           user_id: string;
           check_in_date: string;
-          validated_by: string;
+          validated_by: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
           user_id: string;
           check_in_date?: string;
-          validated_by: string;
+          validated_by?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["attendances"]["Insert"]>;
@@ -103,7 +105,8 @@ export interface Database {
           amount: number;
           payment_date: string;
           receipt_number: string;
-          validated_by: string;
+          validated_by: string | null;
+          notes: string | null;
           created_at: string;
         };
         Insert: {
@@ -113,14 +116,20 @@ export interface Database {
           amount: number;
           payment_date?: string;
           receipt_number: string;
-          validated_by: string;
+          validated_by?: string | null;
+          notes?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payment_transactions"]["Insert"]>;
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      generate_receipt_number: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
