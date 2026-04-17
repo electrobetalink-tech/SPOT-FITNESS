@@ -1,6 +1,17 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { EditSubscriptionForm } from "@/components/subscribers/edit-subscription-form";
+import { buildMetadata } from "@/lib/seo";
+
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+  return buildMetadata({
+    title: `Modifier abonnement #${params.id.slice(0, 8)}`,
+    description: "Mise à jour de l'abonnement d'un membre par le SuperAdmin.",
+    path: `/admin/subscribers/${params.id}/edit`,
+    noIndex: true
+  });
+}
 
 export default async function EditSubscriptionPage({ params }: { params: { id: string } }) {
   const supabase = createClient() as any;
