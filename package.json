@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run lint && npm run typecheck",
+    "ci:check": "npm run lint && npm run typecheck && npm run build",
+    "vercel:pull": "npx vercel pull --yes --environment=production --token=$VERCEL_TOKEN",
+    "vercel:build": "npx vercel build --prod --token=$VERCEL_TOKEN",
+    "vercel:deploy": "npx vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
