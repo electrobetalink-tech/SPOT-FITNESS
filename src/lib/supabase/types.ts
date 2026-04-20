@@ -1,6 +1,7 @@
 export type UserRole = "superadmin" | "member";
 export type SubscriptionStatus = "active" | "expired" | "blocked" | "pending_payment";
 export type PlanType = "monthly" | "semester" | "yearly";
+export type NotificationType = "success" | "error" | "info" | "warning";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -124,6 +125,31 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["payment_transactions"]["Insert"]>;
       };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          title: string;
+          message: string;
+          type: NotificationType;
+          metadata: Json | null;
+          is_read: boolean;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          title: string;
+          message: string;
+          type?: NotificationType;
+          metadata?: Json | null;
+          is_read?: boolean;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
+      };
       audit_log: {
         Row: {
           id: string;
@@ -151,7 +177,9 @@ export interface Database {
         Returns: string;
       };
     };
-    Enums: Record<string, never>;
+    Enums: {
+      notification_type: NotificationType;
+    };
     CompositeTypes: Record<string, never>;
   };
 }
